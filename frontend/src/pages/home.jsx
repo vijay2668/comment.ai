@@ -1,16 +1,21 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
+import axios from "axios";
 import { useState } from "react";
+import toast from "react-hot-toast";
+import { AiOutlineDownload } from "react-icons/ai";
+import { IoClose } from "react-icons/io5";
+import Modal from "react-modal";
+import { MultiSelect } from "react-multi-select-component";
+import { useNavigate, Link } from "react-router-dom";
 import {
   backend_url,
   download,
   extractVideoId,
   fetchComments,
+  getAllVideoSession,
   getCookie,
   getCurrentUser,
 } from "../helpers";
-import toast from "react-hot-toast";
-import { useNavigate } from "react-router-dom";
-import Modal from "react-modal";
-import { IoClose } from "react-icons/io5";
 import {
   cn,
   commentHeaders,
@@ -18,10 +23,6 @@ import {
   fileTypes,
   youtubeRegex,
 } from "../utils.js";
-import { MultiSelect } from "react-multi-select-component";
-import { AiOutlineDownload } from "react-icons/ai";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import axios from "axios";
 
 const Home = ({ isLoggedIn, options, setOptions, selected, setSelected }) => {
   // Queries and Mutations
@@ -33,6 +34,13 @@ const Home = ({ isLoggedIn, options, setOptions, selected, setSelected }) => {
     queryFn: getCurrentUser,
     refetchOnWindowFocus: false,
     enabled: !!refresh_token,
+  });
+
+  const { data: allVideoSession } = useQuery({
+    queryKey: ["allVideoSession"],
+    queryFn: () => getAllVideoSession(currentUser?.id),
+    refetchOnWindowFocus: false,
+    enabled: !!currentUser && !!currentUser.id && !!refresh_token,
   });
 
   const navigate = useNavigate();
@@ -66,7 +74,7 @@ const Home = ({ isLoggedIn, options, setOptions, selected, setSelected }) => {
     sessionStorage.clear();
 
     const createVideoSessionId = await axios.post(
-      `${backend_url}/api/video/${videoId}`,
+      `${backend_url}/api/video/${videoId}?sort=${options?.sort}&max=${options?.max}`,
       {
         channelId: currentUser?.id, //currentUser's channel id
         youtubeChannelId: videoIdOwnerChannelId, //video owner's channel id
@@ -156,13 +164,37 @@ const Home = ({ isLoggedIn, options, setOptions, selected, setSelected }) => {
             Enter your Youtube Video Link
           </h3>
           <div className="flex w-full flex-col items-center justify-center space-y-1">
-            <input
-              value={youtubeVideoLink}
-              onChange={handleChange}
-              placeholder="Enter your Youtube Video Link"
-              type="text"
-              className="w-full rounded-full border border-zinc-400 bg-zinc-700 p-2 text-base text-white"
-            />
+            <div className="flex w-full items-center space-x-2">
+              <input
+                value={youtubeVideoLink}
+                onChange={handleChange}
+                placeholder="Enter your Youtube Video Link"
+                type="text"
+                className="w-full rounded-full border border-zinc-400 bg-zinc-700 p-2 text-base text-white"
+              />
+              {isLoggedIn && allVideoSession?.length > 0 && (
+                <details className="dropdown">
+                  <summary className="btn m-1 rounded-full bg-zinc-800 text-white transition-shadow hover:bg-zinc-800 hover:shadow hover:shadow-zinc-500">
+                    History
+                  </summary>
+                  <ul className="menu dropdown-content z-[1] w-fit rounded-box bg-base-100 p-2 shadow">
+                    {allVideoSession.map((videoSession, i) => {
+                      const { youtubeVideoId, sort, max } = videoSession;
+                      return (
+                        <li key={i}>
+                          <Link
+                            className="whitespace-nowrap"
+                            to={`/comments/${youtubeVideoId}?sort=${sort}&max=${max}`}
+                          >
+                            {`/comments/${youtubeVideoId}?sort=${sort}&max=${max}`}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </details>
+              )}
+            </div>
             {youtubeVideoLink && !isValidLink && (
               <p className="text-red-500">This is not a valid YouTube link.</p>
             )}
@@ -176,6 +208,7 @@ const Home = ({ isLoggedIn, options, setOptions, selected, setSelected }) => {
               <AiOutlineDownload className="min-h-5 min-w-5" />
               <span>Download</span>
             </button>
+
             <button
               type="button"
               onClick={() => openModal("analyze")}

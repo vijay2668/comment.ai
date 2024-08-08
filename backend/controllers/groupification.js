@@ -4,7 +4,7 @@ const createGroupification = async (req, res) => {
   const { sentimentId, sentimentKey } = req.params;
   const { videoId, channelId, groupification_data } = req.body;
 
-  await db.groupification.create({
+  const generatedGroupification = await db.groupification.create({
     data: {
       videoId, // videoId as db.video.id
       channelId, //currentUser's channel id as db.channel.id
@@ -14,7 +14,34 @@ const createGroupification = async (req, res) => {
     }
   });
 
-  res.send("Groupification created successfully!");
+  res.json(generatedGroupification);
+};
+
+const updateGroupification = async (req, res) => {
+  const { groupificationId } = req.params;
+  const { groupification_data, sentiment_data } = req.body;
+
+  const updatedGroupification = await db.groupification.update({
+    where: {
+      id: groupificationId
+    },
+    data: {
+      groupification_data //updated groupification data
+    }
+  });
+
+  res.json(updatedGroupification);
+
+  if (!sentiment_data) return;
+
+  await db.sentiment.update({
+    where: {
+      id: updatedGroupification?.sentimentId
+    },
+    data: {
+      sentiment_data //updated sentiment data
+    }
+  });
 };
 
 const getGroupification = async (req, res) => {
@@ -30,7 +57,11 @@ const getGroupification = async (req, res) => {
     }
   });
 
-  res.send(groupification);
+  res.json(groupification);
 };
 
-module.exports = { createGroupification, getGroupification };
+module.exports = {
+  createGroupification,
+  getGroupification,
+  updateGroupification
+};

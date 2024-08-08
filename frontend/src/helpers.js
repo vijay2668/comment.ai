@@ -25,46 +25,60 @@ function extractVideoId(url){
   }
 };
 
+function commentFormatter(comment){
+  const formatedComment = {
+    cid: comment.id,
+    text: comment.snippet.topLevelComment.snippet.textDisplay,
+    time: timeAgo(comment.snippet.topLevelComment.snippet.publishedAt),
+    author: comment.snippet.topLevelComment.snippet.authorDisplayName,
+    channel: comment.snippet.topLevelComment.snippet.authorChannelId.value,
+    votes: comment.snippet.topLevelComment.snippet.likeCount,
+    replies: comment.snippet.totalReplyCount,
+    photo: comment.snippet.topLevelComment.snippet.authorProfileImageUrl,
+    heart: comment.snippet.topLevelComment.snippet.canRate,
+    reply: comment.snippet.canReply,
+    publishedAt: formatDate(
+      comment.snippet.topLevelComment.snippet.publishedAt
+    )
+  }
+
+  return formatedComment
+}
+
+function replyFormatter(reply){
+  const formatedReply = {
+    cid: reply.id,
+    parentId: reply.snippet.parentId,
+    text: reply.snippet.textDisplay,
+    time: timeAgo(reply.snippet.publishedAt),
+    author: reply.snippet.authorDisplayName,
+    channel: reply.snippet.authorChannelId.value,
+    votes: reply.snippet.likeCount,
+    replies: 0,
+    photo: reply.snippet.authorProfileImageUrl,
+    heart: reply.snippet.canRate,
+    reply: true,
+    publishedAt: formatDate(reply.snippet.publishedAt)
+  }
+
+  return formatedReply
+}
+
+
 async function fetchComments({ videoId, options }){
   try {
     const response = await axios.post(
       `${backend_url}/api/comments/${videoId}`,
       { options }
-    );
+    ).then((res)=> res.data);
 
     const comments = [
-      ...response.data.items.map((comment) => ({
-        cid: comment.id,
-        text: comment.snippet.topLevelComment.snippet.textDisplay,
-        time: timeAgo(comment.snippet.topLevelComment.snippet.publishedAt),
-        author: comment.snippet.topLevelComment.snippet.authorDisplayName,
-        channel: comment.snippet.topLevelComment.snippet.authorChannelId.value,
-        votes: comment.snippet.topLevelComment.snippet.likeCount,
-        replies: comment.snippet.totalReplyCount,
-        photo: comment.snippet.topLevelComment.snippet.authorProfileImageUrl,
-        heart: comment.snippet.topLevelComment.snippet.canRate,
-        reply: comment.snippet.canReply,
-        publishedAt: formatDate(
-          comment.snippet.topLevelComment.snippet.publishedAt
-        )
-      })),
+      ...response.items.map((comment) => commentFormatter(comment)),
       ...(options?.replies
-        ? response.data.items
+        ? response.items
             .filter((item) => Number(item.snippet.totalReplyCount) > 0)
             .flatMap((item) =>
-              item.replies.comments.map((reply) => ({
-                cid: reply.id,
-                text: reply.snippet.textDisplay,
-                time: timeAgo(reply.snippet.publishedAt),
-                author: reply.snippet.authorDisplayName,
-                channel: reply.snippet.authorChannelId.value,
-                votes: reply.snippet.likeCount,
-                replies: 0,
-                photo: reply.snippet.authorProfileImageUrl,
-                heart: reply.snippet.canRate,
-                reply: true,
-                publishedAt: formatDate(reply.snippet.publishedAt)
-              }))
+              item.replies.comments.map((reply) => replyFormatter(reply))
             )
         : [])
     ]
@@ -275,10 +289,6 @@ async function handleGroups({ simplified_comments, sentimentValue }){
           return newGroup.group_of_comments.length !== 0 ? newGroup : null;
         })
         .filter(Boolean)
-
-    // const remaining = sentiment.filter((item)=> {
-      
-    // })
     
     return data
   } catch (error) {
@@ -495,46 +505,31 @@ async function updateComment(comment, setUpdate, value, mentionedUserComment){
   }
 };
 
-async function moderateComments(comments, setIsModerating, banAuthor = false){
+async function hideUserFromChannel(comments, setIsHiding){
   try {
-    setIsModerating(true)
+    setIsHiding(true)
     const access_token = await getAccessToken()
 
-    const promises = comments?.map(async (comment) => {
-      const { cid, moderationStatus } = comment;
-      
-      if(banAuthor === true && moderationStatus === "rejected") {
-        const response = await axios.post(`https://youtube.googleapis.com/youtube/v3/comments/setModerationStatus?id=${cid}&moderationStatus=${moderationStatus}&banAuthor=${banAuthor}&key=${process.env.REACT_APP_API_KEY}`, {}, {
-          headers: {
-            'Authorization': `Bearer ${access_token}`,
-            'Accept': 'application/json'
-          }
-        })
+    const promises = comments?.map(async ({ cid }) => {
+      const response = await axios.post(`https://youtube.googleapis.com/youtube/v3/comments/setModerationStatus?id=${cid}&moderationStatus=rejected&banAuthor=true&key=${process.env.REACT_APP_API_KEY}`, {}, {
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+          'Accept': 'application/json'
+        }
+      })
 
-        return response
-      } else {
-        const response = await axios.post(`https://youtube.googleapis.com/youtube/v3/comments/setModerationStatus?id=${cid}&moderationStatus=${moderationStatus}&key=${process.env.REACT_APP_API_KEY}`, {}, {
-          headers: {
-            'Authorization': `Bearer ${access_token}`,
-            'Accept': 'application/json'
-          }
-        })
-      
-        return response
-      }
-  })
+      return response
+    })
     
     const results = await Promise.all(promises);
-    // console.log(results);
     return results
-    // console.log(response.data);
   } catch (err) {
-    console.error("Error moderating comments", err.message);
+    console.error("Error hidding user comments", err.message);
     toast.error(err.message)
-    setIsModerating(false)
+    setIsHiding(false)
   } finally {
-    toast.success(`${comments?.length === 1 ? "Comment": "Comments"} Moderated successfully!`);
-    setIsModerating(false)
+    toast.success(`User Comments got Hidden successfully!`);
+    setIsHiding(false)
   }
 };
 
@@ -841,9 +836,14 @@ async function getCurrentUser() {
   return currentUserChannel;
 }
 
-async function getVideoSession(youtubeVideoId) {
-  const currentVideoSession = await axios.get(`${backend_url}/api/video/${youtubeVideoId}`).then((res)=> res.data);
+async function getVideoSession(youtubeVideoId, sort, max) {
+  const currentVideoSession = await axios.get(`${backend_url}/api/video/${youtubeVideoId}?sort=${sort}&max=${max}`).then((res)=> res.data);
   return currentVideoSession;
+}
+
+async function getAllVideoSession(channelId) {
+  const allVideoSession = await axios.get(`${backend_url}/api/videos/${channelId}`).then((res)=> res.data);
+  return allVideoSession;
 }
 
 async function getSentiment(videoId) {
@@ -856,9 +856,150 @@ async function getGroupification(sentimentId, sentimentKey) {
   return groupification;
 }
 
+const parseDate = (dateString) => {
+  const [datePart, timePart] = dateString.split(' @');
+  const [day, month, year] = datePart.split('-').map(Number);
+  const [hour, minute, second] = timePart.split(':').map(Number);
+  return new Date(year + 2000, month - 1, day, hour, minute, second);
+};
+
+const getMostRecentDate = (group) =>
+  Math.max(
+    ...group?.map((group_of_comment) => {
+      return group_of_comment ? parseDate(group_of_comment?.publishedAt) : new Date(0);
+    }),
+  );
+
+const getTotalVotes = (group) =>
+  group?.reduce((total, group_of_comment) => {
+    return total + (group_of_comment?.votes || 0);
+  }, 0);
+
+const getTotalReplies = (group) =>
+  group?.reduce((replies, group_of_comment) => {
+    return replies + (group_of_comment?.replies || 0);
+  }, 0);
+
+const groupificationSortByHelper = (groupification_data, groupificationSortBy) => {
+  return groupification_data?.sort((a, b) => {
+    if (groupificationSortBy === "most-likes") {
+      // Sum the votes for each group of comments
+      return (
+        getTotalVotes(b?.group_of_comments) -
+        getTotalVotes(a?.group_of_comments)
+      );
+    } else if (groupificationSortBy === "most-replies") {
+      // Find the most recent publishedAt in each group of comments
+      return (
+        getTotalReplies(b?.group_of_comments) -
+        getTotalReplies(a?.group_of_comments)
+      );
+    } else if (groupificationSortBy === "time") {
+      // Find the most recent publishedAt in each group of comments
+      return (
+        getMostRecentDate(b?.group_of_comments) -
+        getMostRecentDate(a?.group_of_comments)
+      );
+    } else {
+      // Default sorting by number of comments in each group
+      // console.log(list)
+      return b?.group_of_comments?.length - a?.group_of_comments?.length;
+    }
+  })
+}
+
+function getOriginalComments(a, b) {
+  return a?.filter((comment) => b?.some((cid) => cid === comment?.cid));
+}
+
+function groupificationGeneratedToast(setTab) {
+  toast.custom(
+    (t) => (
+      <div
+        onClick={() => {
+          setTab(1);
+          toast.dismiss(t.id);
+        }}
+        className={`${
+          t.visible ? "animate-enter" : "animate-leave"
+        } pointer-events-auto flex w-full max-w-md cursor-pointer flex-col overflow-hidden rounded-lg bg-white shadow-lg ring-1 ring-black ring-opacity-5`}
+      >
+        <div className="flex w-full">
+          <div className="w-0 flex-1 p-4">
+            <div className="flex items-start">
+              <div className="ml-3 flex-1">
+                <p className="text-sm font-medium text-gray-900">Done 👍</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  Click here to check
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="animate-scale h-1 bg-red-500"></div>
+      </div>
+    ),
+    {
+      position: "bottom-right",
+      duration: 10000,
+    },
+  );
+}
+
+const fetchCommentsDetails = async (list) => {
+  const cids = list.join("%2C");
+
+  const getCommentIdsDetails = await axios
+    .get(
+      `https://youtube.googleapis.com/youtube/v3/comments?part=snippet&id=${cids}&key=${process.env.REACT_APP_API_KEY}`,
+    )
+    .then((res) => res.data.items);
+
+  const results = getCommentIdsDetails.map((comment) => ({
+    cid: comment.id,
+    channel: comment.snippet.authorChannelId.value,
+  }));
+
+  return results;
+};
+
+const fetchModifiedCommentsDetails = async (array, commentKey, conditionWith) => {
+  const fetchedCommentsDetails = await fetchCommentsDetails(array);
+  return fetchedCommentsDetails
+    .filter((com) => !conditionWith.some((comment) => comment[commentKey] === com[commentKey]))
+    .map(({ cid }) => cid);
+};
+
+const updateSentimentData = async (sentiment, commentKey, conditionWith, sentimentId) => {
+  const modifiedSentimentData = {};
+
+  for (const [key, array] of Object.entries(sentiment)) {
+    modifiedSentimentData[key] = await fetchModifiedCommentsDetails(array, commentKey, conditionWith);
+  }
+
+  await axios.patch(`${backend_url}/api/sentiment/${sentimentId}`, {
+    sentiment_data: modifiedSentimentData,
+  });
+};
+
+const updateGroupificationData = async (groupifications, commentKey, conditionWith) => {
+  for (const groupification of groupifications) {
+    const modifiedGroupificationData = await Promise.all(
+      groupification.groupification_data.map(async (group) => {
+        const groupComments = await fetchModifiedCommentsDetails(group.group_of_comments, commentKey, conditionWith);
+        return { ...group, group_of_comments: groupComments };
+      })
+    );
+
+    await axios.patch(`${backend_url}/api/groupification/${groupification.id}`, {
+      groupification_data: modifiedGroupificationData,
+    });
+  }
+};
 
 export {
-  backend_url, arraysAreEqual, deleteComments, download, extractVideoId, fetchComments, fetchRejectedComments, formatDate, formatNumber, getAccessToken, getCookie, getCurrentUser, getVideoSession, getSentiment, getGroupification, getSessionStorage, getTokenInfo, handleCategorize, handleGroups, handleSimplified, linkRegex, moderateComments, renderRow, replacer, replies,
+  backend_url, fetchCommentsDetails, getAllVideoSession, commentFormatter, replyFormatter, getOriginalComments, groupificationGeneratedToast, parseDate, groupificationSortByHelper, arraysAreEqual, deleteComments, download, extractVideoId, fetchComments, fetchRejectedComments, formatDate, formatNumber, getAccessToken, getCookie, getCurrentUser, getVideoSession, getSentiment, getGroupification, getSessionStorage, getTokenInfo, handleCategorize, handleGroups, handleSimplified, linkRegex, hideUserFromChannel, renderRow, replacer, replies,
   reply, timeAgo, timeSince, transformTextWithLink, updateComment
 };
 
+export { fetchModifiedCommentsDetails, updateSentimentData, updateGroupificationData }

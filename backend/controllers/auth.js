@@ -47,7 +47,7 @@ const auth = async (req, res) => {
       });
     }
 
-    res.send(tokens);
+    res.json(tokens);
   } catch (error) {
     console.log(error);
     res.send("Error while creating User");

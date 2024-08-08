@@ -7,7 +7,7 @@ const channel = async (req, res) => {
     where: { youtubeChannelId: channelId }
   });
 
-  res.send(channel);
+  res.json(channel);
 };
 
 module.exports = { channel };

@@ -23,7 +23,6 @@ model Channel {
   videos         Video[]
   Sentiment      Sentiment[]
   Groupification Groupification[]
-  // BannedAuthor   BannedAuthor[]
 }
 
 model Video {
@@ -31,6 +30,9 @@ model Video {
 
   youtubeVideoId   String @unique //youtube video Id
   youtubeChannelId String //youtube channel Id
+  
+  sort             String
+  max              String
 
   channelId String  @db.ObjectId //db object as channel
   channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
@@ -87,17 +89,3 @@ model Groupification {
   @@index([sentimentId])
   @@index([channelId])
 }
-
-// model BannedAuthor {
-//   id String @id @default(auto()) @map("_id") @db.ObjectId
-
-//   channelId String  @db.ObjectId //db object as channel
-//   channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-
-//   author Json
-
-//   createdAt DateTime @default(now())
-//   updatedAt DateTime @updatedAt
-
-//   @@index([channelId])
-// }

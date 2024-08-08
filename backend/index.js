@@ -1,10 +1,8 @@
+require('dotenv').config();
 const express = require("express");
 const cors = require("cors"); // Import the 'cors' package
-const dotenv = require("dotenv");
 const bodyParser = require("body-parser");
 const { rootRouter } = require("./routes/index");
-
-dotenv.config();
 
 const app = express();
 // Enable CORS for all routes

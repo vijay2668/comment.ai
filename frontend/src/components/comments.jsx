@@ -1,5 +1,5 @@
 import { useIntersection } from "@mantine/hooks";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import axios from "axios";
 import React, { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
@@ -9,16 +9,22 @@ import { FiThumbsUp } from "react-icons/fi";
 import { IoIosArrowDown } from "react-icons/io";
 import { MdSubdirectoryArrowRight } from "react-icons/md";
 import {
+  backend_url,
   deleteComments,
-  formatDate,
-  getSessionStorage,
-  moderateComments,
+  fetchCommentsDetails,
+  getGroupification,
+  getSentiment,
+  hideUserFromChannel,
+  linkRegex,
+  replacer,
   reply,
-  timeAgo,
+  replyFormatter,
   transformTextWithLink,
   updateComment,
+  updateGroupificationData,
+  updateSentimentData,
 } from "../helpers";
-import { cn } from "../utils";
+import { cn, sentimentKeys } from "../utils";
 import { MenuComp } from "./menu";
 import { Tooltip } from "./tooltip";
 
@@ -36,7 +42,7 @@ export const CommentsComp = ({
   const [hoverIndex, setHoverIndex] = useState(null);
   const [subHoverIndex, setSubHoverIndex] = useState(null);
 
-  const [replies, setReplies] = useState([]);
+  const [repliesList, setRepliesList] = useState([]);
   const [nextPageTokenParentIds, setNextPageTokenParentIds] = useState([]);
 
   // useInfiniteQuery
@@ -89,7 +95,7 @@ export const CommentsComp = ({
 
   // operations states start
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isModerating, setIsModerating] = useState(false);
+  const [isHiding, setIsHiding] = useState(false);
   const [update, setUpdate] = useState({
     isUpdating: false,
     showTextarea: false,
@@ -112,104 +118,47 @@ export const CommentsComp = ({
       </div>
     );
 
-  const handleUpdate = async (e, comment) => {
+  const menuUpdate = async (e, comment) => {
     e.preventDefault();
     const { value } = e.target[0];
     if (!value || value.trim() === "") {
       toast.error("Your Comment is empty!");
     } else {
       if (comment?.parentId) {
-        const res = await updateComment(
+        const index = repliesList?.findIndex((com) => com.cid === comment.cid);
+
+        const updatedComment = await updateComment(
           comment,
           setUpdate,
           value,
-          replies.find((reply) => value?.includes(reply.author)),
-        );
-        // console.log(comment);
-        // console.log(value);
+          repliesList.find((reply) => value?.includes(reply.author)),
+        ).then((res) => res.snippet.textDisplay);
 
-        const {
-          id: cid,
-          snippet: {
-            textDisplay: text,
-            authorDisplayName: author,
-            authorChannelId: { value: channel },
-            likeCount: votes,
-            authorProfileImageUrl: photo,
-            canRate: heart,
-            parentId,
-            updatedAt,
-          },
-        } = res;
+        if (!updatedComment) return;
 
-        const updatedSubComment = {
-          cid,
-          parentId,
-          text,
-          time: timeAgo(updatedAt),
-          author,
-          channel,
-          votes,
-          replies: comment.replies,
-          photo,
-          heart,
-          reply: comment.reply,
-          publishedAt: formatDate(updatedAt),
-        };
-
-        const copy_of_sub_comments = replies.filter(
-          (com) => com.cid !== comment.cid,
+        const updated_repliesList = repliesList.map((com, i) =>
+          i === index ? { ...com, text: updatedComment } : com,
         );
 
-        const modifiedSubComments = [
-          updatedSubComment,
-          ...copy_of_sub_comments,
-        ];
-
-        if (res) {
-          e.target[0].value = "";
-          setReplies(modifiedSubComments);
-        }
+        setRepliesList(updated_repliesList);
+        e.target[0].value = "";
       } else {
-        const res = await updateComment(comment, setUpdate, value);
-        // console.log(comment);
-        // console.log(value);
+        const index = _dataCopy?.findIndex((com) => com.cid === comment.cid);
 
-        const {
-          id: cid,
-          snippet: {
-            textDisplay: text,
-            authorDisplayName: author,
-            authorChannelId: { value: channel },
-            likeCount: votes,
-            authorProfileImageUrl: photo,
-            canRate: heart,
-            updatedAt,
-          },
-        } = res;
+        const updatedComment = await updateComment(
+          comment,
+          setUpdate,
+          value,
+        ).then((res) => res.snippet.textDisplay);
 
-        const updatedComment = {
-          cid,
-          text,
-          time: timeAgo(updatedAt),
-          author,
-          channel,
-          votes,
-          replies: comment.replies,
-          photo,
-          heart,
-          reply: comment.reply,
-          publishedAt: formatDate(updatedAt),
-        };
+        if (!updatedComment) return;
 
-        const copy_of_list = list?.filter((com) => com.cid !== comment.cid);
+        const updated_data_copy = _dataCopy.map((com, i) =>
+          i === index ? { ...com, text: updatedComment } : com,
+        );
 
-        const modifiedList = [updatedComment, ...copy_of_list];
-
-        if (res) {
-          e.target[0].value = "";
-          set_dataCopy(modifiedList);
-        }
+        set_dataCopy(updated_data_copy);
+        e.target[0].value = "";
       }
     }
   };
@@ -221,220 +170,157 @@ export const CommentsComp = ({
       toast.error("Your reply is empty!");
     } else {
       const res = await reply(comment, setRespond, value);
-      // console.log(res);
-      // console.log(value)
 
-      const {
-        id: cid,
-        snippet: {
-          textDisplay: text,
-          authorDisplayName: author,
-          authorChannelId: { value: channel },
-          likeCount: votes,
-          authorProfileImageUrl: photo,
-          canRate: heart,
-          parentId,
-          updatedAt,
-        },
-      } = res;
+      const formattedReply = replyFormatter(res);
 
-      const respondedComment = {
-        cid,
-        parentId,
-        text,
-        time: timeAgo(updatedAt),
-        author,
-        channel,
-        votes,
-        replies: comment.replies,
-        photo,
-        heart,
-        reply: comment.reply,
-        publishedAt: formatDate(updatedAt),
-      };
+      if (!formattedReply) return;
 
-      // setInitialInteraction((prev) => [respondedComment, ...prev]);
-      setReplies((prev) => [respondedComment, ...prev]);
+      const index = _dataCopy?.findIndex(
+        (com) => com.cid === formattedReply.parentId,
+      );
 
-      set_dataCopy((prev) => {
-        // Find the index of the comment with the specified parentId
-        const index = prev.findIndex((prv) => prv.cid === parentId);
+      const updated_data_copy = _dataCopy.map((com, i) =>
+        i === index ? { ...com, replies: com.replies + 1 } : com,
+      );
 
-        // If the comment is not found, return the previous state unmodified
-        if (index === -1) return prev;
-
-        // Create a copy of the comment to be updated
-        const updatedComment = {
-          ...prev[index],
-          replies: prev[index].replies + 1,
-        };
-
-        // Create a new array with the updated comment
-        return [
-          ...prev.slice(0, index),
-          updatedComment,
-          ...prev.slice(index + 1),
-        ];
-      });
-
-      if (res) e.target[0].value = "";
+      setRepliesList((prev) => [...prev, formattedReply]);
+      set_dataCopy(updated_data_copy);
+      e.target[0].value = "";
     }
   };
 
-  const handleModerator = async (moderationComments, banAuthor = false) => {
-    const res = await moderateComments(
-      moderationComments,
-      setIsModerating,
-      banAuthor,
+  const handleHideUser = async (e) => {
+    const { value } = e;
+
+    const res = await hideUserFromChannel(value, setIsHiding);
+    if (res[0].status !== 204) return;
+
+    set_dataCopy(_dataCopy.filter((com) => com.channel !== value[0].channel));
+    setRepliesList(
+      repliesList.filter((com) => com.channel !== value[0].channel),
     );
-    // console.log(res);
+
+    const fetchedSentiment = await getSentiment(videoSession?.id);
+
+    const sentiment = fetchedSentiment?.sentiment_data;
+    const sentimentId = fetchedSentiment?.id;
+
+    if (!sentiment || !sentimentId) return;
+
+    await updateSentimentData(sentiment, "channel", value, sentimentId);
+
+    const groupifications = await Promise.all(
+      sentimentKeys.map((key) => getGroupification(sentimentId, key)),
+    ).then((res) => res.filter(Boolean));
+
+    if (!groupifications || groupifications.length === 0) return;
+
+    await updateGroupificationData(groupifications, "channel", value);
+  };
+
+  const handleRemove = async (e) => {
+    const { value } = e;
+    const res = await deleteComments(value, setIsDeleting);
 
     if (res[0].status !== 204) return;
-    const recentModeration = getSessionStorage("moderation") || [];
 
-    const copy_of_moderations = recentModeration?.filter(
-      (com) =>
-        !moderationComments.some(
-          (moderationComment) => moderationComment.cid === com.cid,
-        ),
-    );
+    if (value?.length === 1 && value[0]?.parentId) {
+      const filteredRepliesList = repliesList?.filter(
+        (reply) => reply.cid !== value[0].cid,
+      );
 
-    const filteredList = list?.filter(
-      (com) =>
-        !moderationComments.some(
-          (moderationComment) => moderationComment?.cid === com?.cid,
-        ),
-    );
+      const index = _dataCopy?.findIndex(
+        (com) => com.cid === value[0]?.parentId,
+      );
 
-    set_dataCopy(filteredList);
+      const updated_data_copy = _dataCopy.map((com, i) =>
+        i === index ? { ...com, replies: com.replies - 1 } : com,
+      );
 
-    sessionStorage.setItem(
-      "moderation",
-      JSON.stringify([
-        ...moderationComments.map((moderationComment) => ({
-          ...moderationComment,
-          banAuthor,
-        })),
-        ...copy_of_moderations,
-      ]),
-    );
-    setSelected([]);
+      setRepliesList(filteredRepliesList);
+      set_dataCopy(updated_data_copy);
+    } else {
+      set_dataCopy(_dataCopy?.filter((com) => com.cid !== value[0].cid));
+
+      const fetchedSentiment = await getSentiment(videoSession?.id);
+
+      const sentiment = fetchedSentiment?.sentiment_data;
+      const sentimentId = fetchedSentiment?.id;
+
+      if (!sentiment || !sentimentId) return;
+
+      await updateSentimentData(sentiment, "cid", value, sentimentId);
+
+      const groupifications = await Promise.all(
+        sentimentKeys.map((key) => getGroupification(sentimentId, key)),
+      ).then((res) => res.filter(Boolean));
+
+      if (!groupifications || groupifications.length === 0) return;
+
+      await updateGroupificationData(groupifications, "cid", value);
+    }
+  };
+
+  const handleReply = (e) => {
+    const { value } = e;
+    setRespond((prev) => ({
+      ...prev,
+      showTextarea: true,
+      comment: value[0],
+    }));
+    setUpdate((prev) => ({
+      ...prev,
+      showTextarea: false,
+      comment: null,
+    }));
+  };
+
+  const handleUpdate = (e) => {
+    const { value } = e;
+    setUpdate((prev) => ({
+      ...prev,
+      showTextarea: true,
+      comment: value[0],
+    }));
+    setRespond((prev) => ({
+      ...prev,
+      showTextarea: false,
+      comment: null,
+    }));
   };
 
   // menu operations start
   const menuOperations = [
     {
       label: "Reply",
-      onClick: (e) => {
-        const { value } = e;
-        // console.log("reply", e);
-        setRespond((prev) => ({
-          ...prev,
-          showTextarea: true,
-          comment: value[0],
-        }));
-        setUpdate((prev) => ({
-          ...prev,
-          showTextarea: false,
-          comment: null,
-        }));
-      },
+      onClick: handleReply,
     },
-    videoSession?.youtubeChannelId === currentUser?.youtubeChannelId
-      ? {
-          label: "Hide user from channel",
-          onClick: (e) => {
-            const { value } = e;
-            // console.log("banAuthor", e);
-            handleModerator(
-              value.map((comment) => ({
-                ...comment,
-                moderationStatus: "rejected",
-              })),
-              true,
-            );
+    ...(videoSession?.youtubeChannelId === currentUser?.youtubeChannelId
+      ? [
+          {
+            label: "Hide user from channel",
+            onClick: handleHideUser,
           },
-        }
-      : null,
-    videoSession?.youtubeChannelId === currentUser?.youtubeChannelId
-      ? {
-          label: "Remove",
-          onClick: async (e) => {
-            const { value } = e;
-            const res = await deleteComments(value, setIsDeleting);
-
-            if (res[0].status !== 204) return;
-
-            // console.log("delete", value);
-            const filteredList = list?.filter(
-              (com) => !value.some((comment) => comment?.cid === com?.cid),
-            );
-
-            set_dataCopy(filteredList);
-            setSelected([]);
+          {
+            label: "Remove",
+            onClick: handleRemove,
           },
-        }
-      : null,
-  ].filter(Boolean); // Filters out null values
+        ]
+      : []),
+  ];
 
   const ownerMenuOperations = [
     {
       label: "Update",
-      onClick: (e) => {
-        const { value } = e;
-        setUpdate((prev) => ({
-          ...prev,
-          showTextarea: true,
-          comment: value[0],
-        }));
-        setRespond((prev) => ({
-          ...prev,
-          showTextarea: false,
-          comment: null,
-        }));
-      },
+      onClick: handleUpdate,
     },
     {
       label: "Reply",
-      onClick: (e) => {
-        const { value } = e;
-        // console.log("reply", e);
-        setRespond((prev) => ({
-          ...prev,
-          showTextarea: true,
-          comment: value[0],
-        }));
-        setUpdate((prev) => ({
-          ...prev,
-          showTextarea: false,
-          comment: null,
-        }));
-      },
+      onClick: handleReply,
     },
     {
       label: "Delete",
-      onClick: async (e) => {
-        const { value } = e;
-        const res = await deleteComments(value, setIsDeleting);
-
-        if (res[0].status !== 204) return;
-
-        // console.log("delete", value);
-        const filteredComments = _dataCopy.filter(
-          (com) => !value.some((comment) => comment.cid === com.cid),
-        );
-
-        if (value?.length === 1 && value[0]?.parentId) {
-          setReplies((prev) =>
-            prev.filter(
-              (reply) => !value.some((comment) => comment.cid === reply.cid),
-            ),
-          );
-        } else {
-          set_dataCopy(filteredComments);
-        }
-        setSelected([]);
-      },
+      onClick: handleRemove,
     },
   ];
   // menu operations end
@@ -453,29 +339,17 @@ export const CommentsComp = ({
 
     // console.log(response.data);
 
-    const latestReplies = response.data.items.map((item) => ({
-      cid: item.id,
-      parentId: item.snippet.parentId,
-      text: item.snippet.textDisplay,
-      time: timeAgo(item.snippet.publishedAt),
-      author: item.snippet.authorDisplayName,
-      channel: item.snippet.authorChannelId.value,
-      votes: item.snippet.likeCount,
-      replies: 0,
-      photo: item.snippet.authorProfileImageUrl,
-      heart: item.snippet.canRate,
-      reply: true,
-      publishedAt: formatDate(item.snippet.publishedAt),
-    }));
+    const latestReplies = response.data.items.map((item) =>
+      replyFormatter(item),
+    );
 
     setNextPageTokenParentIds((prev) => [
       ...prev.filter((prv) => prv.parentId !== cid),
       { parentId: cid, nextPageToken: response.data.nextPageToken },
     ]);
-    setReplies((prev) => [...latestReplies, ...prev]);
+    setRepliesList((prev) => [...prev, ...latestReplies]);
   };
 
-  // console.log(_dataCopy);
   const regex = /@@(\w+)/;
 
   return (
@@ -555,10 +429,11 @@ export const CommentsComp = ({
                           "w-full cursor-pointer text-sm",
                         )}
                       >
-                        {comment?.text}
+                        {comment?.text?.replace(linkRegex, replacer)}
                       </div>
                     </div>
                   </div>
+
                   <div className="mt-2.5 flex h-fit min-w-fit items-center justify-start space-x-2">
                     <Tooltip content="Like Count">
                       <div className="flex min-w-fit items-center justify-start space-x-2 text-sm">
@@ -580,14 +455,12 @@ export const CommentsComp = ({
                         data={[comment]}
                         isPending={
                           isDeleting ||
-                          isModerating ||
+                          isHiding ||
                           update.isUpdating ||
                           respond.isResponding
                         }
                       >
-                        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-800/80">
-                          <BiDotsHorizontalRounded className="text-2xl" />
-                        </div>
+                        <BiDotsHorizontalRounded className="text-2xl" />
                       </MenuComp>
                     </div>
                   )}
@@ -598,16 +471,16 @@ export const CommentsComp = ({
                       type="button"
                       onClick={() => {
                         const hasReplies =
-                          replies.filter(
+                          repliesList.filter(
                             (reply) => reply.parentId === comment.cid,
                           ).length > 0;
 
-                        const filteredReplies = replies.filter(
+                        const filteredReplies = repliesList.filter(
                           (reply) => reply.parentId !== comment.cid,
                         );
 
                         hasReplies
-                          ? setReplies(filteredReplies) &&
+                          ? setRepliesList(filteredReplies) &&
                             setNextPageTokenParentIds((prev) =>
                               prev.filter(
                                 (prv) => prv?.parentId !== comment?.cid,
@@ -620,7 +493,7 @@ export const CommentsComp = ({
                       <div>
                         <IoIosArrowDown
                           className={cn(
-                            replies.filter(
+                            repliesList.filter(
                               (reply) => reply.parentId === comment.cid,
                             ).length > 0 && "-rotate-180",
                             "transition-all",
@@ -629,7 +502,7 @@ export const CommentsComp = ({
                       </div>
                       <span>{comment.replies} replies</span>
                     </button>
-                    {replies
+                    {repliesList
                       .filter((reply) => reply?.parentId === comment?.cid)
                       .map((reply, index) => (
                         <div
@@ -683,22 +556,21 @@ export const CommentsComp = ({
                                 data={[reply]}
                                 isPending={
                                   isDeleting ||
-                                  isModerating ||
+                                  isHiding ||
                                   update.isUpdating ||
                                   respond.isResponding
                                 }
                               >
-                                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-800/80">
-                                  <BiDotsHorizontalRounded className="text-2xl" />
-                                </div>
+                                <BiDotsHorizontalRounded className="text-2xl" />
                               </MenuComp>
                             </div>
                           )}
                         </div>
                       ))}
 
-                    {replies.filter((reply) => reply?.parentId === comment?.cid)
-                      .length > 0 &&
+                    {repliesList.filter(
+                      (reply) => reply?.parentId === comment?.cid,
+                    ).length > 0 &&
                       nextPageTokenParentIds.find(
                         (nextPageTokenParentId) =>
                           nextPageTokenParentId?.parentId === comment?.cid,
@@ -729,7 +601,7 @@ export const CommentsComp = ({
                 update?.comment?.parentId === comment?.cid ? (
                   <form
                     className="h-fit w-full pl-8"
-                    onSubmit={(e) => handleUpdate(e, update?.comment)}
+                    onSubmit={(e) => menuUpdate(e, update?.comment)}
                   >
                     <div className="flex h-fit w-full flex-col space-y-2 overflow-hidden">
                       <textarea
@@ -889,6 +761,7 @@ export const CommentsComp = ({
                     </div>
                   </div>
                 </div>
+
                 <div className="mt-2.5 flex h-fit min-w-fit items-center justify-start space-x-2">
                   <Tooltip content="Like Count">
                     <div className="flex min-w-fit items-center justify-start space-x-2 text-sm">
@@ -899,6 +772,7 @@ export const CommentsComp = ({
                     </div>
                   </Tooltip>
                 </div>
+
                 {!showCheckboxes && (
                   <div className="flex h-fit w-fit items-center justify-start space-x-2">
                     <MenuComp
@@ -910,14 +784,12 @@ export const CommentsComp = ({
                       data={[comment]}
                       isPending={
                         isDeleting ||
-                        isModerating ||
+                        isHiding ||
                         update.isUpdating ||
                         respond.isResponding
                       }
                     >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-800/80">
-                        <BiDotsHorizontalRounded className="text-2xl" />
-                      </div>
+                      <BiDotsHorizontalRounded className="text-2xl" />
                     </MenuComp>
                   </div>
                 )}
@@ -928,16 +800,16 @@ export const CommentsComp = ({
                     type="button"
                     onClick={() => {
                       const hasReplies =
-                        replies.filter(
+                        repliesList.filter(
                           (reply) => reply.parentId === comment.cid,
                         ).length > 0;
 
-                      const filteredReplies = replies.filter(
+                      const filteredReplies = repliesList.filter(
                         (reply) => reply.parentId !== comment.cid,
                       );
 
                       hasReplies
-                        ? setReplies(filteredReplies) &&
+                        ? setRepliesList(filteredReplies) &&
                           setNextPageTokenParentIds((prev) =>
                             prev.filter(
                               (prv) => prv?.parentId !== comment?.cid,
@@ -950,7 +822,7 @@ export const CommentsComp = ({
                     <div>
                       <IoIosArrowDown
                         className={cn(
-                          replies.filter(
+                          repliesList.filter(
                             (reply) => reply.parentId === comment.cid,
                           ).length > 0 && "-rotate-180",
                           "transition-all",
@@ -959,7 +831,7 @@ export const CommentsComp = ({
                     </div>
                     <span>{comment.replies} replies</span>
                   </button>
-                  {replies
+                  {repliesList
                     .filter((reply) => reply?.parentId === comment?.cid)
                     .map((reply, index) => (
                       <div
@@ -1010,22 +882,21 @@ export const CommentsComp = ({
                               data={[reply]}
                               isPending={
                                 isDeleting ||
-                                isModerating ||
+                                isHiding ||
                                 update.isUpdating ||
                                 respond.isResponding
                               }
                             >
-                              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-800/80">
-                                <BiDotsHorizontalRounded className="text-2xl" />
-                              </div>
+                              <BiDotsHorizontalRounded className="text-2xl" />
                             </MenuComp>
                           </div>
                         )}
                       </div>
                     ))}
 
-                  {replies.filter((reply) => reply?.parentId === comment?.cid)
-                    .length > 0 &&
+                  {repliesList.filter(
+                    (reply) => reply?.parentId === comment?.cid,
+                  ).length > 0 &&
                     nextPageTokenParentIds.find(
                       (nextPageTokenParentId) =>
                         nextPageTokenParentId?.parentId === comment?.cid,
@@ -1056,7 +927,7 @@ export const CommentsComp = ({
               update?.comment?.parentId === comment?.cid ? (
                 <form
                   className="h-fit w-full pl-8"
-                  onSubmit={(e) => handleUpdate(e, update?.comment)}
+                  onSubmit={(e) => menuUpdate(e, update?.comment)}
                 >
                   <div className="flex h-fit w-full flex-col space-y-2 overflow-hidden">
                     <textarea

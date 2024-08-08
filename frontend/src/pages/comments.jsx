@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { BiDotsHorizontalRounded } from "react-icons/bi";
 import { FaLayerGroup } from "react-icons/fa";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CommentsComp } from "../components/comments";
 import { Loader } from "../components/loader/loader";
 import { MenuComp } from "../components/menu";
@@ -17,17 +17,25 @@ import {
   getCookie,
   getCurrentUser,
   getGroupification,
+  getOriginalComments,
   getSentiment,
-  getSessionStorage,
   getVideoSession,
+  groupificationGeneratedToast,
   handleGroups,
   handleSimplified,
-  moderateComments,
+  hideUserFromChannel,
+  updateGroupificationData,
+  updateSentimentData,
 } from "../helpers";
-import { cn } from "../utils";
+import { cn, sentimentKeys } from "../utils";
+import { IoIosArrowBack } from "react-icons/io";
 
 const Comments = () => {
+  const navigate = useNavigate();
   const { videoId } = useParams();
+  const [searchParams] = useSearchParams();
+  const sort = searchParams.get("sort");
+  const max = searchParams.get("max");
 
   const refresh_token = getCookie("refresh_token");
   // Queries and Mutations
@@ -40,9 +48,27 @@ const Comments = () => {
 
   const { data: videoSession } = useQuery({
     queryKey: ["videoSession"],
-    queryFn: () => getVideoSession(videoId),
+    queryFn: () => getVideoSession(videoId, sort, max),
     refetchOnWindowFocus: false,
     enabled: !!videoId,
+  });
+
+  const [comments, setComments] = useState([]);
+
+  // Queries and Mutations
+  const { isFetching } = useQuery({
+    queryKey: ["comments"],
+    queryFn: async () => {
+      const latestComments = await fetchComments({
+        videoId,
+        options: { max, sort },
+      });
+
+      setComments(latestComments);
+      return latestComments;
+    },
+    refetchOnWindowFocus: false,
+    enabled: !!refresh_token,
   });
 
   const { data: recentSentiment } = useQuery({
@@ -60,16 +86,11 @@ const Comments = () => {
       enabled: !!recentSentiment,
     });
 
-  const [searchParams] = useSearchParams();
-  const sort = searchParams.get("sort");
-  const max = searchParams.get("max");
+  const [sentiment, setSentiment] = useState(null);
 
-  const [groupification, setGroupification] = useState([]);
-
-  useEffect(() => {
-    if (!recentGroupification) return;
-    setGroupification(recentGroupification.groupification_data);
-  }, [recentGroupification]);
+  const [groupification, setGroupification] = useState(null);
+  const [groupificationSortBy, setGroupificationSortBy] =
+    useState("most-comments");
 
   // console.log(groupification);
 
@@ -78,73 +99,69 @@ const Comments = () => {
       const simplified_comments = await handleSimplified(sentimentValue);
       return await handleGroups({ simplified_comments, sentimentValue });
     },
-    onSuccess: async (latestGroupification) => {
-      // console.log(
-      //   "groupification generated successfully:",
-      //   latestGroupification,
-      // );
+    onSuccess: async (data) => {
+      const latestGroupification = data.map((group) => ({
+        ...group,
+        group_of_comments: group.group_of_comments.map(({ cid }) => cid),
+      }));
 
-      if (recentSentiment) {
-        await axios.post(
-          `${backend_url}/api/groupification/${recentSentiment?.id}/comments`, //getLastRecentSentiment.id as sentimentId as db.sentiment.id & // comments as sentimentKey as (positives, negatives, questions, neutrals, comments)
-          {
-            videoId: videoSession.id, // videoId as db.video.id
-            channelId: currentUser.id, //currentUser's channel id
-            groupification_data: latestGroupification, //groupification data
-          },
+      try {
+        let generatedGroupification;
+
+        if (recentSentiment) {
+          generatedGroupification = await axios
+            .post(
+              `${backend_url}/api/groupification/${recentSentiment.id}/comments`,
+              {
+                videoId: videoSession.id,
+                channelId: currentUser.id,
+                groupification_data: latestGroupification,
+              },
+            )
+            .then((res) => res.data);
+        } else {
+          const generatedSentiment = await axios
+            .post(`${backend_url}/api/sentiment/${videoSession.id}`, {
+              channelId: currentUser.id,
+              sentiment_data: { comments: comments.map(({ cid }) => cid) },
+            })
+            .then((res) => res.data);
+
+          setSentiment(generatedSentiment.sentiment_data);
+
+          generatedGroupification = await axios
+            .post(
+              `${backend_url}/api/groupification/${generatedSentiment.id}/comments`,
+              {
+                videoId: videoSession.id,
+                channelId: currentUser.id,
+                groupification_data: latestGroupification,
+              },
+            )
+            .then((res) => res.data);
+        }
+
+        const updatedGroupificationData = await Promise.all(
+          generatedGroupification.groupification_data.map(async (group) => ({
+            ...group,
+            group_of_comments: await getOriginalComments(
+              comments,
+              group?.group_of_comments,
+            ),
+          })),
         );
-      } else {
-        const generatedSentiment = await axios
-          .post(`${backend_url}/api/sentiment/${videoSession.id}`, {
-            channelId: currentUser.id, //currentUser's channel id
-            sentiment_data: { comments },
-          })
-          .then((res) => res.data);
 
-        await axios.post(
-          `${backend_url}/api/groupification/${generatedSentiment?.id}/comments`, //getLastRecentSentiment.id as sentimentId as db.sentiment.id & // comments as sentimentKey as (positives, negatives, questions, neutrals, comments)
-          {
-            videoId: videoSession.id, // videoId as db.video.id
-            channelId: currentUser.id, //currentUser's channel id
-            groupification_data: latestGroupification, //groupification data
-          },
+        setGroupification({
+          ...generatedGroupification,
+          groupification_data: updatedGroupificationData,
+        });
+        groupificationGeneratedToast(setTab);
+      } catch (error) {
+        console.error(
+          "Error during groupification or sentiment generation:",
+          error.message,
         );
       }
-
-      setGroupification(latestGroupification);
-      // console.log(latestGroupification);
-
-      toast.custom(
-        (t) => (
-          <div
-            onClick={() => {
-              setTab(1);
-              toast.dismiss(t.id);
-            }}
-            className={`${
-              t.visible ? "animate-enter" : "animate-leave"
-            } pointer-events-auto flex w-full max-w-md cursor-pointer flex-col overflow-hidden rounded-lg bg-white shadow-lg ring-1 ring-black ring-opacity-5`}
-          >
-            <div className="flex w-full">
-              <div className="w-0 flex-1 p-4">
-                <div className="flex items-start">
-                  <div className="ml-3 flex-1">
-                    <p className="text-sm font-medium text-gray-900">Done 👍</p>
-                    <p className="mt-1 text-sm text-gray-500">
-                      Click here to check
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="animate-scale h-1 bg-red-500"></div>
-          </div>
-        ),
-        {
-          position: "bottom-right",
-          duration: 10000,
-        },
-      );
     },
   });
 
@@ -154,64 +171,105 @@ const Comments = () => {
 
   // operations states start
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isModerating, setIsModerating] = useState(false);
+  const [isHiding, setIsHiding] = useState(false);
 
   const [showCheckboxes, setShowCheckboxes] = useState(false);
   const [selected, setSelected] = useState([]);
   // operations states end
 
-  // Queries and Mutations
-  const { data: comments = [], isFetching } = useQuery({
-    queryKey: ["comments"],
-    queryFn: async () => {
-      const latestComments = await fetchComments({
-        videoId,
-        options: { max, sort },
-      });
+  useEffect(() => {
+    if (!recentSentiment) return;
+    setSentiment(recentSentiment.sentiment_data);
+  }, [recentSentiment]);
 
-      return latestComments;
-    },
-    refetchOnWindowFocus: false,
-    enabled: !!refresh_token,
-  });
-
-  const handleModerator = async (moderationComments, banAuthor = false) => {
-    const res = await moderateComments(
-      moderationComments,
-      setIsModerating,
-      banAuthor,
-    );
-    // console.log(res);
-
-    if (res[0].status !== 204) return;
-    const recentModeration = getSessionStorage("moderation") || [];
-
-    const copy_of_moderations = [...recentModeration].filter(
-      (com) =>
-        !moderationComments.some(
-          (moderationComment) => moderationComment.cid === com.cid,
-        ),
-    );
-
-    const filteredList = _dataCopy.filter(
-      (com) =>
-        !moderationComments.some(
-          (moderationComment) => moderationComment.cid === com.cid,
-        ),
-    );
-
-    set_dataCopy(filteredList);
-
-    sessionStorage.setItem(
-      "moderation",
-      JSON.stringify([
-        ...moderationComments.map((moderationComment) => ({
-          ...moderationComment,
-          banAuthor,
+  useEffect(() => {
+    if (!recentGroupification) return;
+    const groupificationFormatter = async () => {
+      const updatedGroupificationData = await Promise.all(
+        recentGroupification.groupification_data.map(async (group) => ({
+          ...group,
+          group_of_comments: await getOriginalComments(
+            comments,
+            group?.group_of_comments,
+          ),
         })),
-        ...copy_of_moderations,
-      ]),
+      );
+
+      setGroupification({
+        ...recentGroupification,
+        groupification_data: updatedGroupificationData,
+      });
+    };
+
+    groupificationFormatter();
+  }, [comments, recentGroupification]);
+
+  const handleHideUser = async (e) => {
+    const { value } = e;
+
+    if (
+      value.some((comment) => comment.channel === currentUser.youtubeChannelId)
+    ) {
+      toast.error("You can't Ban yourself, Please unSelect your Comments");
+      return;
+    }
+
+    const res = await hideUserFromChannel(value, setIsHiding);
+    if (res[0].status !== 204) return;
+
+    set_dataCopy(
+      _dataCopy.filter(
+        (com) => !value.some((comment) => comment.channel === com.channel),
+      ),
     );
+
+    const fetchedSentiment = await getSentiment(videoSession.id);
+
+    const sentiment = fetchedSentiment?.sentiment_data;
+    const sentimentId = fetchedSentiment?.id;
+
+    if (!sentiment || !sentimentId) return;
+
+    await updateSentimentData(sentiment, "channel", value, sentimentId);
+
+    const groupifications = await Promise.all(
+      sentimentKeys.map((key) => getGroupification(sentimentId, key)),
+    ).then((res) => res.filter(Boolean));
+
+    if (!groupifications || groupifications.length === 0) return;
+
+    await updateGroupificationData(groupifications, "channel", value);
+    setSelected([]);
+  };
+
+  const handleRemove = async (e) => {
+    const { value } = e;
+
+    const res = await deleteComments(value, setIsDeleting);
+    if (res[0].status !== 204) return;
+
+    set_dataCopy(
+      _dataCopy.filter(
+        (com) => !value.some((comment) => comment.cid === com.cid),
+      ),
+    );
+
+    const fetchedSentiment = await getSentiment(videoSession.id);
+
+    const sentiment = fetchedSentiment?.sentiment_data;
+    const sentimentId = fetchedSentiment?.id;
+
+    if (!sentiment || !sentimentId) return;
+
+    await updateSentimentData(sentiment, "cid", value, sentimentId);
+
+    const groupifications = await Promise.all(
+      sentimentKeys.map((key) => getGroupification(sentimentId, key)),
+    ).then((res) => res.filter(Boolean));
+
+    if (!groupifications || groupifications.length === 0) return;
+
+    await updateGroupificationData(groupifications, "cid", value);
     setSelected([]);
   };
 
@@ -219,42 +277,11 @@ const Comments = () => {
   const commonMenuOperations = [
     {
       label: "Hide user from channel",
-      onClick: (e) => {
-        const { value } = e;
-        if (
-          value.some(
-            (comment) => comment.channel === currentUser.youtubeChannelId,
-          )
-        ) {
-          toast.error("You can't Ban yourself, Please unSelect your Comments");
-          return;
-        }
-        // console.log("banAuthor", e);
-        handleModerator(
-          value.map((comment) => ({
-            ...comment,
-            moderationStatus: "rejected",
-          })),
-          true,
-        );
-      },
+      onClick: handleHideUser,
     },
     {
       label: "Delete",
-      onClick: async (e) => {
-        const { value } = e;
-        const res = await deleteComments(value, setIsDeleting);
-
-        if (res[0].status !== 204) return;
-
-        // console.log("delete", value);
-        const filteredList = _dataCopy.filter(
-          (com) => !value.some((comment) => comment.cid === com.cid),
-        );
-
-        set_dataCopy(filteredList);
-        setSelected([]);
-      },
+      onClick: handleRemove,
     },
   ];
 
@@ -283,15 +310,65 @@ const Comments = () => {
 
   return (
     <div className="flex h-full w-full flex-col space-y-2 overflow-hidden">
-      <div className="flex h-fit w-full items-center justify-between px-4">
-        <div className="h-fit w-fit text-xl font-bold capitalize">
-          {showCheckboxes
-            ? `Selected - ${selected?.length}`
-            : tab === 0
-              ? `Comment - ${comments?.length}`
-              : `Categorize - ${groupification?.length}`}
-        </div>
-        {videoSession?.youtubeChannelId === currentUser?.youtubeChannelId &&
+      <div className="flex min-h-10 w-full items-center justify-between px-4">
+        <button
+          onClick={() => navigate(-1)}
+          className="group flex h-fit w-fit items-center space-x-1"
+        >
+          <div
+            className={cn(
+              "border group-hover:bg-[#1D242E]",
+              "flex min-h-10 min-w-10 items-center justify-center rounded-l-lg border-[#252C36] bg-[#0E1420] transition-colors",
+            )}
+          >
+            <IoIosArrowBack className="h-5 w-5" />
+          </div>
+          <div
+            className={cn(
+              "border group-hover:bg-[#1D242E]",
+              "flex h-10 w-fit items-center justify-center whitespace-nowrap rounded-r-lg border-[#252C36] bg-[#0E1420] px-6 transition-colors",
+            )}
+          >
+            {showCheckboxes
+              ? `Selected - ${selected?.length}`
+              : tab === 0
+                ? `Comment - ${comments?.length}`
+                : `Categorize - ${groupification?.groupification_data?.length}`}
+          </div>
+        </button>
+
+        {groupification?.groupification_data?.length !== 0 && tab !== 0 && (
+          <select
+            onChange={(e) => setGroupificationSortBy(e.target.value)}
+            className="select select-info select-sm w-fit focus:outline-none"
+            value={groupificationSortBy}
+          >
+            <option
+              value="most-comments"
+              disabled={groupificationSortBy === "most-comments"}
+            >
+              Most Comments
+            </option>
+            <option
+              value="most-likes"
+              disabled={groupificationSortBy === "most-likes"}
+            >
+              Most Likes
+            </option>
+            <option
+              value="most-replies"
+              disabled={groupificationSortBy === "most-replies"}
+            >
+              Most Replies
+            </option>
+            <option value="time" disabled={groupificationSortBy === "time"}>
+              Time
+            </option>
+          </select>
+        )}
+
+        {tab === 0 &&
+          videoSession?.youtubeChannelId === currentUser?.youtubeChannelId &&
           _dataCopy.length > 1 && (
             <div className="flex h-fit w-fit items-center space-x-2">
               {showCheckboxes ? (
@@ -324,11 +401,9 @@ const Comments = () => {
                       <MenuComp
                         options={commonMenuOperations}
                         data={selected}
-                        isPending={isDeleting || isModerating}
+                        isPending={isDeleting || isHiding}
                       >
-                        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-800/80">
-                          <BiDotsHorizontalRounded className="text-2xl" />
-                        </div>
+                        <BiDotsHorizontalRounded className="text-2xl" />
                       </MenuComp>
                     </div>
                   )}
@@ -344,7 +419,9 @@ const Comments = () => {
               )}
             </div>
           )}
-        {groupification?.length === 0 && (
+        {!groupification ||
+        groupification?.groupification_data?.length === 0 ||
+        tab === 1 ? (
           <button
             disabled={isPending}
             onClick={() => generateGroups(comments)}
@@ -371,14 +448,19 @@ const Comments = () => {
               {isPending ? (
                 <div className="h-6 w-6 animate-spin rounded-full border-4 border-zinc-400 border-t-blue-400/50" />
               ) : (
-                <p>Group to Reply</p>
+                <p>
+                  {!groupification ||
+                  groupification?.groupification_data?.length === 0
+                    ? "Group to Reply"
+                    : "ReRun"}
+                </p>
               )}
             </div>
           </button>
-        )}
+        ) : null}
       </div>
 
-      {groupification?.length > 0 && (
+      {groupification?.groupification_data?.length > 0 && (
         <div className="flex w-fit max-w-lg items-center rounded-lg border border-[#252C36] bg-[#0E1420] p-2">
           <button
             type="button"
@@ -418,7 +500,12 @@ const Comments = () => {
       ) : (
         <RenderAccordion
           groupification={groupification}
-          sentimentValue={comments}
+          setGroupification={setGroupification}
+          groupificationSortBy={groupificationSortBy}
+          sentiment={sentiment}
+          sentimentKey={"comments"}
+          currentUser={currentUser}
+          videoSession={videoSession}
         />
       )}
     </div>

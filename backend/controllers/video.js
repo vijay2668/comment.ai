@@ -2,10 +2,11 @@ const { db } = require("../lib/db");
 
 const createVideoSession = async (req, res) => {
   const { youtubeVideoId } = req.params;
+  const { sort, max } = req.query; // Destructure sort and max from searchParams
   const { channelId, youtubeChannelId } = req.body;
 
   const video = await db.video.findUnique({
-    where: { youtubeVideoId }
+    where: { youtubeVideoId, sort, max }
   });
 
   if (!video) {
@@ -13,7 +14,9 @@ const createVideoSession = async (req, res) => {
       data: {
         youtubeVideoId, //video owner's video id
         youtubeChannelId, //video owner's channel id
-        channelId //currentUser's channel id
+        channelId, //currentUser's channel id
+        sort,
+        max
       }
     });
 
@@ -25,12 +28,23 @@ const createVideoSession = async (req, res) => {
 
 const getVideoSession = async (req, res) => {
   const { youtubeVideoId } = req.params;
+  const { sort, max } = req.query; // Destructure sort and max from searchParams
 
   const video = await db.video.findUnique({
-    where: { youtubeVideoId }
+    where: { youtubeVideoId, sort, max }
   });
 
-  res.send(video);
+  res.json(video);
 };
 
-module.exports = { createVideoSession, getVideoSession };
+const getAllVideoSession = async (req, res) => {
+  const { channelId } = req.params;
+
+  const videos = await db.video.findMany({
+    where: { channelId }
+  });
+
+  res.json(videos);
+};
+
+module.exports = { createVideoSession, getVideoSession, getAllVideoSession };

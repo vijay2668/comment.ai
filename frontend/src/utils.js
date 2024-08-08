@@ -98,42 +98,36 @@ export const textCenter = (comments) => {
   };
 }
 
-export const progressbarData = ({comments, sentiment}) => {
+export const progressbarData = ({ comments, sentiment }) => {
+  const totalComments = comments?.length || 0;
+
   return [
     {
-      count: sentiment?.positives?.length,
+      count: sentiment?.positives?.length || 0,
       label: "Positive",
       color: "#22c55e",
-      percentage: Math.floor(
-        (sentiment?.positives?.length / comments?.length) * 100,
-      ),
+      percentage: totalComments ? Math.floor((sentiment?.positives?.length || 0) / totalComments * 100) : 0,
       icon: FiThumbsUp,
     },
     {
-      count: sentiment?.negatives?.length,
+      count: sentiment?.negatives?.length || 0,
       label: "Negative",
       color: "#ef4444",
-      percentage: Math.floor(
-        (sentiment?.negatives?.length / comments?.length) * 100,
-      ),
+      percentage: totalComments ? Math.floor((sentiment?.negatives?.length || 0) / totalComments * 100) : 0,
       icon: FiThumbsDown,
     },
     {
-      count: sentiment?.questions?.length,
+      count: sentiment?.questions?.length || 0,
       label: "Question",
       color: "#3b82f6",
-      percentage: Math.floor(
-        (sentiment?.questions?.length / comments?.length) * 100,
-      ),
+      percentage: totalComments ? Math.floor((sentiment?.questions?.length || 0) / totalComments * 100) : 0,
       icon: BsQuestionDiamond,
     },
     {
-      count: sentiment?.neutrals?.length,
+      count: sentiment?.neutrals?.length || 0,
       label: "Neutral",
       color: "#6b7280",
-      percentage: Math.floor(
-        (sentiment?.neutrals?.length / comments?.length) * 100,
-      ),
+      percentage: totalComments ? Math.floor((sentiment?.neutrals?.length || 0) / totalComments * 100) : 0,
       icon: FiFlag,
     },
   ];

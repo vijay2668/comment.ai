@@ -96,7 +96,6 @@ const App = () => {
               </Sidebar>
             }
           />
-          {/* {/* <Route path="/about" element={<About />} /> */}
         </Routes>
       </Router>
     </div>
