@@ -104,21 +104,6 @@ const LiveStats = () => {
   // console.log(channel);
   // console.log(isViewsUpdated);
 
-  const {
-    snippet: {
-      country,
-      customUrl,
-      title,
-      description,
-      thumbnails: {
-        default: { url, width, height },
-      },
-      publishedAt,
-    },
-    statistics: { videoCount, viewCount, subscriberCount },
-    topicDetails: { topicCategories },
-  } = channel;
-
   return (
     <div className="flex h-full w-full flex-col space-y-6 overflow-scroll overflow-x-hidden">
       {/* row one */}
@@ -135,22 +120,27 @@ const LiveStats = () => {
                 <img
                   className="aspect-square h-full w-full"
                   style={{
-                    width: `${width + 30}px`,
-                    height: `${height + 30}px`,
+                    width: `${channel?.snippet?.thumbnails?.default?.width + 30}px`,
+                    height: `${channel?.snippet?.thumbnails?.default?.height + 30}px`,
                   }}
-                  alt={customUrl}
-                  src={url}
+                  alt={channel?.snippet?.customUrl}
+                  src={channel?.snippet?.thumbnails?.default?.url}
                 />
               </span>
               <div className="flex flex-col">
                 <div className="flex items-center space-x-2">
-                  <h1 className="text-2xl font-bold">{title}</h1>
+                  <h1 className="text-2xl font-bold">
+                    {channel?.snippet?.title}
+                  </h1>
                   <span className="font-mono text-sm">
-                    {country ? country : "NA"}
+                    {channel?.snippet?.country
+                      ? channel?.snippet?.country
+                      : "NA"}
                   </span>
                 </div>
                 <div className="text-[#7D828F]">
-                  {customUrl} <span>{videoCount} videos</span>
+                  {channel?.snippet?.customUrl}{" "}
+                  <span>{channel?.statistics?.videoCount} videos</span>
                 </div>
               </div>
             </div>
@@ -171,7 +161,7 @@ const LiveStats = () => {
                 {showLive ? (
                   <Odometer value={subscribers} format="(,ddd),dd" />
                 ) : (
-                  formatNumber(subscriberCount)
+                  formatNumber(channel?.statistics?.subscriberCount)
                 )}
               </h3>
             </div>
@@ -190,7 +180,7 @@ const LiveStats = () => {
                 {showLive ? (
                   <Odometer value={channel_views} format="(,ddd),dd" />
                 ) : (
-                  formatNumber(viewCount)
+                  formatNumber(channel?.statistics?.viewCount)
                 )}
               </h3>
             </div>
@@ -204,24 +194,26 @@ const LiveStats = () => {
         <div className="flex h-fit w-full items-center justify-between px-4 py-2">
           <div className="flex w-full flex-1 flex-col items-center justify-center space-y-2">
             <img
-              src={`https://flagsapi.com/${country}/flat/64.png`}
-              alt={country}
+              src={`https://flagsapi.com/${channel?.snippet?.country}/flat/64.png`}
+              alt={channel?.snippet?.country}
             />
           </div>
           <div className="flex w-full flex-1 flex-col items-center justify-center space-y-2">
             <p className="text-[#7D828F]">Category</p>
-            <p>{topicCategories[1]?.split("/").pop()}</p>
+            <p>
+              {channel?.topicDetails?.topicCategories?.[1]?.split("/")?.pop()}
+            </p>
           </div>
           <div className="flex w-full flex-1 flex-col items-center justify-center space-y-2">
             <p className="text-[#7D828F]">Channel Age</p>
-            <p>{timeSince(publishedAt)}</p>
+            <p>{timeSince(channel?.snippet?.publishedAt)}</p>
           </div>
         </div>
-        <div className="h-full w-full whitespace-pre-line p-4">
+        <div className="h-full w-full whitespace-pre-line p-4 overflow-y-scroll">
           <span className="text-2xl">About</span>
           <br />
           <br />
-          <p className="text-white/80">{description}</p>
+          <p className="text-white/80">{channel?.snippet?.description}</p>
         </div>
       </div>
     </div>

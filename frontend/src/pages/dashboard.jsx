@@ -15,6 +15,7 @@ import {
 import "react-circular-progressbar/dist/styles.css";
 import { FaRegUser } from "react-icons/fa";
 import { FiThumbsUp } from "react-icons/fi";
+import { IoClose } from "react-icons/io5";
 import {
   Link,
   useNavigate,
@@ -36,30 +37,35 @@ import {
   backend_url,
   deleteComments,
   fetchComments,
-  formatDate,
   getCookie,
   getCurrentUser,
+  getGroupification,
   getSentiment,
-  getSessionStorage,
   getVideoSession,
   handleCategorize,
-  moderateComments,
+  hideUserFromChannel,
   reply,
-  timeAgo,
+  replyFormatter,
   transformTextWithLink,
   updateComment,
+  updateGroupificationData,
+  updateSentimentData
 } from "../helpers";
-import { cn, data, progressbarData, textCenter } from "../utils";
+import { cn, data, progressbarData, sentimentKeys, textCenter } from "../utils";
 
 ChartJS.register(ArcElement, ToolT, Legend, ChartDataLabels);
 ChartJS.defaults.plugins.legend.position = "right";
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const { videoId } = useParams();
+  const [searchParams] = useSearchParams();
+  const sort = searchParams.get("sort");
+  const max = searchParams.get("max");
 
   const { data: videoSession } = useQuery({
     queryKey: ["videoSession"],
-    queryFn: () => getVideoSession(videoId),
+    queryFn: () => getVideoSession(videoId, sort, max),
     refetchOnWindowFocus: false,
     enabled: !!videoId,
   });
@@ -70,11 +76,6 @@ const Dashboard = () => {
     refetchOnWindowFocus: false,
     enabled: !!videoSession,
   });
-
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const sort = searchParams.get("sort");
-  const max = searchParams.get("max");
 
   const [hoverIndex, setHoverIndex] = useState(null);
   const [subHoverIndex, setSubHoverIndex] = useState(null);
@@ -87,7 +88,7 @@ const Dashboard = () => {
   }, [recentSentiment]);
 
   const [comments, setComments] = useState([]);
-  const [replies, setReplies] = useState([]);
+  const [repliesList, setRepliesList] = useState([]);
   const [nextPageTokenParentIds, setNextPageTokenParentIds] = useState([]);
 
   const refresh_token = getCookie("refresh_token");
@@ -100,12 +101,7 @@ const Dashboard = () => {
   });
 
   // Queries and Mutations
-  const {
-    refetch: refetchComments,
-    isFetched,
-    isFetching,
-    isError,
-  } = useQuery({
+  const { isFetched, isFetching, isError } = useQuery({
     queryKey: ["comments"],
     queryFn: async () => {
       const latestComments = await fetchComments({
@@ -130,20 +126,20 @@ const Dashboard = () => {
       // console.log("Sentiment generated successfully:", latestSentiment);
       setSentiment(latestSentiment);
 
-      await axios.post(
-        `${backend_url}/api/sentiment/${videoSession.id}`,
-        {
-          channelId: currentUser.id, //currentUser's channel id
-          sentiment_data: { comments, ...latestSentiment },
-          sentimentId: recentSentiment.id, //this is here to make sure that if recentSentiment exists then update it otherwise create it.
+      await axios.post(`${backend_url}/api/sentiment/${videoSession.id}`, {
+        channelId: currentUser.id, //currentUser's channel id
+        sentiment_data: {
+          comments: comments.map(({ cid }) => cid),
+          ...latestSentiment,
         },
-      );
+        sentimentId: recentSentiment?.id, //this is here to make sure that if recentSentiment exists then update it otherwise create it.
+      });
     },
   });
 
   // operations states start
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isModerating, setIsModerating] = useState(false);
+  const [isHiding, setIsHiding] = useState(false);
   const [update, setUpdate] = useState({
     isUpdating: false,
     showTextarea: false,
@@ -173,106 +169,47 @@ const Dashboard = () => {
       </div>
     );
 
-  const handleUpdate = async (e, comment) => {
+  const menuUpdate = async (e, comment) => {
     e.preventDefault();
     const { value } = e.target[0];
     if (!value || value.trim() === "") {
       toast.error("Your Comment is empty!");
     } else {
       if (comment?.parentId) {
-        const res = await updateComment(
+        const index = repliesList?.findIndex((com) => com.cid === comment.cid);
+
+        const updatedComment = await updateComment(
           comment,
           setUpdate,
           value,
-          replies.find((reply) => value?.includes(reply.author)),
-        );
-        // console.log(comment);
-        // console.log(value);
+          repliesList.find((reply) => value?.includes(reply.author)),
+        ).then((res) => res.snippet.textDisplay);
 
-        const {
-          id: cid,
-          snippet: {
-            textDisplay: text,
-            authorDisplayName: author,
-            authorChannelId: { value: channel },
-            likeCount: votes,
-            authorProfileImageUrl: photo,
-            canRate: heart,
-            parentId,
-            updatedAt,
-          },
-        } = res;
+        if (!updatedComment) return;
 
-        const updatedSubComment = {
-          cid,
-          parentId,
-          text,
-          time: timeAgo(updatedAt),
-          author,
-          channel,
-          votes,
-          replies: comment.replies,
-          photo,
-          heart,
-          reply: comment.reply,
-          publishedAt: formatDate(updatedAt),
-        };
-
-        const copy_of_sub_comments = replies.filter(
-          (com) => com.cid !== comment.cid,
+        const updated_repliesList = repliesList.map((com, i) =>
+          i === index ? { ...com, text: updatedComment } : com,
         );
 
-        const modifiedSubComments = [
-          updatedSubComment,
-          ...copy_of_sub_comments,
-        ];
-
-        if (res) {
-          e.target[0].value = "";
-          setReplies(modifiedSubComments);
-        }
+        setRepliesList(updated_repliesList);
+        e.target[0].value = "";
       } else {
-        const res = await updateComment(comment, setUpdate, value);
-        // console.log(comment);
-        // console.log(value);
+        const index = comments?.findIndex((com) => com.cid === comment.cid);
 
-        const {
-          id: cid,
-          snippet: {
-            textDisplay: text,
-            authorDisplayName: author,
-            authorChannelId: { value: channel },
-            likeCount: votes,
-            authorProfileImageUrl: photo,
-            canRate: heart,
-            updatedAt,
-          },
-        } = res;
+        const updatedComment = await updateComment(
+          comment,
+          setUpdate,
+          value,
+        ).then((res) => res.snippet.textDisplay);
 
-        const updatedComment = {
-          cid,
-          text,
-          time: timeAgo(updatedAt),
-          author,
-          channel,
-          votes,
-          replies: comment.replies,
-          photo,
-          heart,
-          reply: comment.reply,
-          publishedAt: formatDate(updatedAt),
-        };
+        if (!updatedComment) return;
 
-        const copy_of_comments = comments.filter(
-          (com) => com.cid !== comment.cid,
+        const updatedComments = comments.map((com, i) =>
+          i === index ? { ...com, text: updatedComment } : com,
         );
 
-        const modifiedComments = [updatedComment, ...copy_of_comments];
-
-        if (res) {
-          e.target[0].value = "";
-          setComments(modifiedComments);
-        }
+        setComments(updatedComments);
+        e.target[0].value = "";
       }
     }
   };
@@ -284,223 +221,158 @@ const Dashboard = () => {
       toast.error("Your reply is empty!");
     } else {
       const res = await reply(comment, setRespond, value);
-      // console.log(res);
-      // console.log(value)
 
-      const {
-        id: cid,
-        snippet: {
-          textDisplay: text,
-          authorDisplayName: author,
-          authorChannelId: { value: channel },
-          likeCount: votes,
-          authorProfileImageUrl: photo,
-          canRate: heart,
-          parentId,
-          updatedAt,
-        },
-      } = res;
+      const formattedReply = replyFormatter(res);
 
-      const respondedComment = {
-        cid,
-        parentId,
-        text,
-        time: timeAgo(updatedAt),
-        author,
-        channel,
-        votes,
-        replies: comment.replies,
-        photo,
-        heart,
-        reply: comment.reply,
-        publishedAt: formatDate(updatedAt),
-      };
+      if (!formattedReply) return;
 
-      // setInitialInteraction((prev) => [respondedComment, ...prev]);
-      setReplies((prev) => [respondedComment, ...prev]);
+      const index = comments?.findIndex(
+        (com) => com.cid === formattedReply.parentId,
+      );
 
-      refetchComments();
+      const updated_data_copy = comments.map((com, i) =>
+        i === index ? { ...com, replies: com.replies + 1 } : com,
+      );
 
-      setComments((prev) => {
-        // Find the index of the comment with the specified parentId
-        const index = prev.findIndex((prv) => prv.cid === parentId);
-
-        // If the comment is not found, return the previous state unmodified
-        if (index === -1) return prev;
-
-        // Create a copy of the comment to be updated
-        const updatedComment = {
-          ...prev[index],
-          replies: prev[index].replies + 1,
-        };
-
-        // Create a new array with the updated comment
-        return [
-          ...prev.slice(0, index),
-          updatedComment,
-          ...prev.slice(index + 1),
-        ];
-      });
-
-      if (res) e.target[0].value = "";
+      setRepliesList((prev) => [...prev, formattedReply]);
+      setComments(updated_data_copy);
+      e.target[0].value = "";
     }
   };
 
-  const handleModerator = async (moderationComments, banAuthor = false) => {
-    const res = await moderateComments(
-      moderationComments,
-      setIsModerating,
-      banAuthor,
+  const handleHideUser = async (e) => {
+    const { value } = e;
+
+    const res = await hideUserFromChannel(value, setIsHiding);
+    if (res[0].status !== 204) return;
+
+    setComments(comments.filter((com) => com.channel !== value[0].channel));
+    setRepliesList(
+      repliesList.filter((com) => com.channel !== value[0].channel),
     );
-    // console.log(res);
+
+    const fetchedSentiment = await getSentiment(videoSession.id);
+
+    const sentiment = fetchedSentiment?.sentiment_data;
+    const sentimentId = fetchedSentiment?.id;
+
+    if (!sentiment || !sentimentId) return;
+
+    await updateSentimentData(sentiment, "channel", value, sentimentId);
+
+    const groupifications = await Promise.all(
+      sentimentKeys.map((key) => getGroupification(sentimentId, key)),
+    ).then((res) => res.filter(Boolean));
+
+    if (!groupifications || groupifications.length === 0) return;
+
+    await updateGroupificationData(groupifications, "channel", value);
+  };
+
+  const handleRemove = async (e) => {
+    const { value } = e;
+    const res = await deleteComments(value, setIsDeleting);
 
     if (res[0].status !== 204) return;
-    const recentModeration = getSessionStorage("moderation") || [];
 
-    const copy_of_moderations = [...recentModeration].filter(
-      (com) =>
-        !moderationComments.some(
-          (moderationComment) => moderationComment.cid === com.cid,
-        ),
-    );
+    if (value?.length === 1 && value[0]?.parentId) {
+      const filteredRepliesList = repliesList?.filter(
+        (reply) => reply.cid !== value[0].cid,
+      );
 
-    const filteredComments = comments.filter(
-      (com) =>
-        !moderationComments.some(
-          (moderationComment) => moderationComment.cid === com.cid,
-        ),
-    );
+      const index = comments?.findIndex(
+        (com) => com.cid === value[0]?.parentId,
+      );
 
-    refetchComments();
-    setComments(filteredComments);
+      const updated_data_copy = comments.map((com, i) =>
+        i === index ? { ...com, replies: com.replies - 1 } : com,
+      );
 
-    sessionStorage.setItem(
-      "moderation",
-      JSON.stringify([
-        ...moderationComments.map((moderationComment) => ({
-          ...moderationComment,
-          banAuthor,
-        })),
-        ...copy_of_moderations,
-      ]),
-    );
+      setRepliesList(filteredRepliesList);
+      setComments(updated_data_copy);
+    } else {
+      setComments(comments?.filter((com) => com.cid !== value[0].cid));
+
+      const fetchedSentiment = await getSentiment(videoSession.id);
+
+      const sentiment = fetchedSentiment?.sentiment_data;
+      const sentimentId = fetchedSentiment?.id;
+
+      if (!sentiment || !sentimentId) return;
+
+      await updateSentimentData(sentiment, "cid", value, sentimentId);
+
+      const groupifications = await Promise.all(
+        sentimentKeys.map((key) => getGroupification(sentimentId, key)),
+      ).then((res) => res.filter(Boolean));
+
+      if (!groupifications || groupifications.length === 0) return;
+
+      await updateGroupificationData(groupifications, "cid", value);
+    }
+  };
+
+  const handleReply = (e) => {
+    const { value } = e;
+    // console.log("reply", e);
+    setRespond((prev) => ({
+      ...prev,
+      showTextarea: true,
+      comment: value[0],
+    }));
+    setUpdate((prev) => ({
+      ...prev,
+      showTextarea: false,
+      comment: null,
+    }));
+  };
+
+  const handleUpdate = (e) => {
+    const { value } = e;
+    setUpdate((prev) => ({
+      ...prev,
+      showTextarea: true,
+      comment: value[0],
+    }));
+    setRespond((prev) => ({
+      ...prev,
+      showTextarea: false,
+      comment: null,
+    }));
   };
 
   // menu operations start
   const menuOperations = [
     {
       label: "Reply",
-      onClick: (e) => {
-        const { value } = e;
-        // console.log("reply", e);
-        setRespond((prev) => ({
-          ...prev,
-          showTextarea: true,
-          comment: value[0],
-        }));
-        setUpdate((prev) => ({
-          ...prev,
-          showTextarea: false,
-          comment: null,
-        }));
-      },
+      onClick: handleReply,
     },
-    videoSession?.youtubeChannelId === currentUser?.youtubeChannelId
-      ? {
-          label: "Hide user from channel",
-          onClick: (e) => {
-            const { value } = e;
-            // console.log("banAuthor", e);
-            handleModerator(
-              value.map((comment) => ({
-                ...comment,
-                moderationStatus: "rejected",
-              })),
-              true,
-            );
+    ...(videoSession?.youtubeChannelId === currentUser?.youtubeChannelId
+      ? [
+          {
+            label: "Hide user from channel",
+            onClick: handleHideUser,
           },
-        }
-      : null,
-    videoSession?.youtubeChannelId === currentUser?.youtubeChannelId
-      ? {
-          label: "Remove",
-          onClick: async (e) => {
-            const { value } = e;
-            const res = await deleteComments(value, setIsDeleting);
-
-            if (res[0].status !== 204) return;
-
-            // console.log("delete", value);
-            const filteredComments = comments.filter(
-              (com) => !value.some((comment) => comment.cid === com.cid),
-            );
-
-            refetchComments();
-            setComments(filteredComments);
+          {
+            label: "Remove",
+            onClick: handleRemove,
           },
-        }
-      : null,
-  ].filter(Boolean); // Filters out null values
+        ]
+      : []),
+  ];
 
   const ownerMenuOperations = [
     {
       label: "Update",
-      onClick: (e) => {
-        const { value } = e;
-        setUpdate((prev) => ({
-          ...prev,
-          showTextarea: true,
-          comment: value[0],
-        }));
-        setRespond((prev) => ({
-          ...prev,
-          showTextarea: false,
-          comment: null,
-        }));
-      },
+      onClick: handleUpdate,
     },
     {
       label: "Reply",
-      onClick: (e) => {
-        const { value } = e;
-        // console.log("reply", e);
-        setRespond((prev) => ({
-          ...prev,
-          showTextarea: true,
-          comment: value[0],
-        }));
-        setUpdate((prev) => ({
-          ...prev,
-          showTextarea: false,
-          comment: null,
-        }));
-      },
+      onClick: handleReply,
     },
     {
       label: "Delete",
-      onClick: async (e) => {
-        const { value } = e;
-        const res = await deleteComments(value, setIsDeleting);
-
-        if (res[0].status !== 204) return;
-
-        // console.log("delete", value);
-        const filteredComments = comments.filter(
-          (com) => !value.some((comment) => comment.cid === com.cid),
-        );
-
-        refetchComments();
-
-        if (value?.length === 1 && value[0]?.parentId) {
-          setReplies((prev) =>
-            prev.filter(
-              (reply) => !value.some((comment) => comment.cid === reply.cid),
-            ),
-          );
-        } else {
-          setComments(filteredComments);
-        }
-      },
+      onClick: handleRemove,
     },
   ];
   // menu operations end
@@ -519,26 +391,15 @@ const Dashboard = () => {
 
     // console.log(response.data);
 
-    const latestReplies = response.data.items.map((item) => ({
-      cid: item.id,
-      parentId: item.snippet.parentId,
-      text: item.snippet.textDisplay,
-      time: timeAgo(item.snippet.publishedAt),
-      author: item.snippet.authorDisplayName,
-      channel: item.snippet.authorChannelId.value,
-      votes: item.snippet.likeCount,
-      replies: 0,
-      photo: item.snippet.authorProfileImageUrl,
-      heart: item.snippet.canRate,
-      reply: true,
-      publishedAt: formatDate(item.snippet.publishedAt),
-    }));
+    const latestReplies = response.data.items.map((item) =>
+      replyFormatter(item),
+    );
 
     setNextPageTokenParentIds((prev) => [
       ...prev.filter((prv) => prv.parentId !== cid),
       { parentId: cid, nextPageToken: response.data.nextPageToken },
     ]);
-    setReplies((prev) => [...latestReplies, ...prev]);
+    setRepliesList((prev) => [...prev, ...latestReplies]);
   };
 
   const regex = /@@(\w+)/;
@@ -549,7 +410,7 @@ const Dashboard = () => {
         <div className="h-fit w-full text-center text-xl font-bold capitalize">
           Comment Sentiment
         </div>
-        <div className="flex h-full w-full items-center justify-evenly space-x-4 overflow-hidden rounded-2xl border border-[#252C36] bg-[#0E1420] p-4">
+        <div className="relative flex h-full w-full items-center justify-evenly space-x-4 overflow-hidden rounded-2xl border border-[#252C36] bg-[#0E1420] p-4">
           {isPending ? (
             <Loader2 />
           ) : !sentiment ? (
@@ -586,6 +447,15 @@ const Dashboard = () => {
               </Link>
             ))
           )}
+          {sentiment && (
+            <button
+              type="button"
+              onClick={() => setSentiment(null)}
+              className="btn-square btn-outline btn-xs absolute right-4 top-4 flex items-center justify-center rounded-lg border border-red-500 text-red-500 transition-all hover:border-red-500 hover:bg-red-500"
+            >
+              <IoClose className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -599,10 +469,10 @@ const Dashboard = () => {
               <Doughnut
                 // className="doughnut"
                 data={data([
-                  sentiment?.positives?.length,
-                  sentiment?.negatives?.length,
-                  sentiment?.questions?.length,
-                  sentiment?.neutrals?.length,
+                  sentiment?.positives?.length || 0,
+                  sentiment?.negatives?.length || 0,
+                  sentiment?.questions?.length || 0,
+                  sentiment?.neutrals?.length || 0,
                 ])}
                 plugins={[textCenter(comments)]}
                 options={{
@@ -704,14 +574,12 @@ const Dashboard = () => {
                         data={[comment]}
                         isPending={
                           isDeleting ||
-                          isModerating ||
+                          isHiding ||
                           update.isUpdating ||
                           respond.isResponding
                         }
                       >
-                        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-800/80">
-                          <BiDotsHorizontalRounded className="text-2xl" />
-                        </div>
+                        <BiDotsHorizontalRounded className="text-2xl" />
                       </MenuComp>
                     </div>
                   </div>
@@ -721,16 +589,16 @@ const Dashboard = () => {
                         type="button"
                         onClick={() => {
                           const hasReplies =
-                            replies.filter(
+                            repliesList.filter(
                               (reply) => reply.parentId === comment.cid,
                             ).length > 0;
 
-                          const filteredReplies = replies.filter(
+                          const filteredReplies = repliesList.filter(
                             (reply) => reply.parentId !== comment.cid,
                           );
 
                           hasReplies
-                            ? setReplies(filteredReplies) &&
+                            ? setRepliesList(filteredReplies) &&
                               setNextPageTokenParentIds((prev) =>
                                 prev.filter(
                                   (prv) => prv?.parentId !== comment?.cid,
@@ -743,7 +611,7 @@ const Dashboard = () => {
                         <div>
                           <IoIosArrowDown
                             className={cn(
-                              replies.filter(
+                              repliesList.filter(
                                 (reply) => reply.parentId === comment.cid,
                               ).length > 0 && "-rotate-180",
                               "transition-all",
@@ -752,7 +620,7 @@ const Dashboard = () => {
                         </div>
                         <span>{comment.replies} replies</span>
                       </button>
-                      {replies
+                      {repliesList
                         .filter((reply) => reply?.parentId === comment?.cid)
                         .map((reply, index) => (
                           <div
@@ -806,20 +674,18 @@ const Dashboard = () => {
                                 data={[reply]}
                                 isPending={
                                   isDeleting ||
-                                  isModerating ||
+                                  isHiding ||
                                   update.isUpdating ||
                                   respond.isResponding
                                 }
                               >
-                                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-800/80">
-                                  <BiDotsHorizontalRounded className="text-2xl" />
-                                </div>
+                                <BiDotsHorizontalRounded className="text-2xl" />
                               </MenuComp>
                             </div>
                           </div>
                         ))}
 
-                      {replies.filter(
+                      {repliesList.filter(
                         (reply) => reply?.parentId === comment?.cid,
                       ).length > 0 &&
                         nextPageTokenParentIds.find(
@@ -852,7 +718,7 @@ const Dashboard = () => {
                   update?.comment?.parentId === comment?.cid ? (
                     <form
                       className="h-fit w-full pl-8"
-                      onSubmit={(e) => handleUpdate(e, update?.comment)}
+                      onSubmit={(e) => menuUpdate(e, update?.comment)}
                     >
                       <div className="flex h-fit w-full flex-col space-y-2 overflow-hidden">
                         <textarea

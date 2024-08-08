@@ -223,7 +223,7 @@ async function analyzeComments(comments) {
       categorizedComments[category] = [];
     }
 
-    categorizedComments[category].push(comment);
+    categorizedComments[category].push(comment.cid);
   });
 
   return categorizedComments;

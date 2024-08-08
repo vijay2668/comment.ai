@@ -10,7 +10,7 @@ const createSentiment = async (req, res) => {
       data: { sentiment_data }
     });
 
-    return res.send(sentiment);
+    return res.json(sentiment);
   }
 
   const sentiment = await db.sentiment.create({
@@ -21,7 +21,7 @@ const createSentiment = async (req, res) => {
     }
   });
 
-  return res.send(sentiment);
+  return res.json(sentiment);
 };
 
 const getSentiment = async (req, res) => {
@@ -34,7 +34,19 @@ const getSentiment = async (req, res) => {
     }
   });
 
-  res.send(sentiment);
+  res.json(sentiment);
 };
 
-module.exports = { createSentiment, getSentiment };
+const updateSentiment = async (req, res) => {
+  const { sentimentId } = req.params;
+  const { sentiment_data } = req.body;
+
+  const sentiment = await db.sentiment.update({
+    where: { id: sentimentId }, // sentimentId as db.sentiment.id
+    data: { sentiment_data }
+  });
+
+  res.json(sentiment);
+};
+
+module.exports = { createSentiment, getSentiment, updateSentiment };

@@ -1,18 +1,22 @@
-import { useState } from "react";
-import { cn } from "../utils";
 import { googleLogout, useGoogleLogin } from "@react-oauth/google";
-import toast from "react-hot-toast";
 import axios from "axios";
-import { TbLogout } from "react-icons/tb";
-import { BiSolidDashboard, BiStats, BiTable } from "react-icons/bi";
+import { useState } from "react";
+import toast from "react-hot-toast";
 import {
-  useParams,
+  BiSolidDashboard,
+  BiSolidHome,
+  BiStats,
+  BiTable,
+} from "react-icons/bi";
+import { TbLogout } from "react-icons/tb";
+import {
   Link,
   useLocation,
+  useParams,
   useSearchParams,
 } from "react-router-dom";
-import { ComponentsHeader } from "./components-header";
 import { backend_url } from "../helpers";
+import { cn } from "../utils";
 
 export const Sidebar = ({ children, isLoggedIn, setIsLoggedIn }) => {
   const location = useLocation();
@@ -95,7 +99,6 @@ export const Sidebar = ({ children, isLoggedIn, setIsLoggedIn }) => {
   return (
     <div className="flex h-full w-full space-x-2 overflow-hidden p-5">
       <div className="flex flex-col space-y-2">
-        <ComponentsHeader />
         <div className="relative h-full w-fit">
           <div
             onMouseEnter={() => setCollapsed(false)}
@@ -106,6 +109,13 @@ export const Sidebar = ({ children, isLoggedIn, setIsLoggedIn }) => {
             )}
           >
             <div className="flex flex-col space-y-1">
+              <Link
+                to="/"
+                className="flex h-10 cursor-pointer items-center space-x-4 overflow-hidden whitespace-nowrap rounded-lg px-3.5 py-2 transition-colors hover:bg-[#1D242E] hover:bg-opacity-50"
+              >
+                <BiSolidHome className="min-h-5 min-w-5" />
+                <span>Home</span>
+              </Link>
               {links.map(({ path, label, icon: Icon, props }) => (
                 <Link
                   key={path}

@@ -1,36 +1,53 @@
-const { getGroupCommentsWithSimplified, gemini, promptTemplate } = require("../functions");
+const { kmeans } = require("ml-kmeans");
+const { gpt } = require("../functions");
+
+const groupPrompt = group => `
+  Analyze the following comments and generate a title that captures the main theme or sentiment expressed in the group. The title should be a single sentence.
+
+  Comments:
+  ${group.map(comment => `- ${comment.text}`).join("\n")}
+
+  Title:
+`;
 
 const getGroups = async (req, res) => {
   try {
     const { simplified_comments } = req.body;
+    const maxWords = 10;
 
-    const batches = [];
-    const batch_size = 10;
-    const responses = [];
+    // Convert comments to vectors
+    const vectors = simplified_comments.map(({ text }) => 
+      Array.from({ length: maxWords }, (_, i) => (text.split(" ")[i] ? text.split(" ")[i].length : 0))
+    );
 
-    for (let i = 0; i < simplified_comments.length; i += batch_size) {
-      batches.push(simplified_comments.slice(i, i + batch_size));
-    }
+    // Determine number of clusters
+    const numClusters = Math.max(2, Math.floor(simplified_comments.length / 10)); // Example: up to 10% of comments
 
-    for (let i = 0; i < batches.length; i++) {
-      const group_prompt = `Make a Group of comments based on their similarity. Generate a "group_about" which is a sentence has the essence of all comments included.\n\nHere is a Structure of comments that you have to use:\n${batches[
-        i
-      ]
-        .map(comment => `- ${comment.cid}:${comment.text}`)
-        .join("\n")}\n\n\nAnd return output in this format: ${JSON.stringify(
-        getGroupCommentsWithSimplified
-      )}.`;
+    // Perform K-Means clustering
+    const { clusters } = kmeans(vectors, numClusters);
 
-      const result = await gemini(`${promptTemplate}\n\n${group_prompt}`);
-      // console.log(result);
-      responses.push(...JSON.parse(result));
+    // Group comments
+    const groups = clusters.reduce((acc, cluster, index) => {
+      (acc[cluster] = acc[cluster] || []).push(simplified_comments[index]);
+      return acc;
+    }, []);
 
-      // console.log(promptTemplate + group_prompt);
-    }
+    // Generate titles
+    const generatedGroups = await Promise.all(
+      groups.map(async group => {
+        try {
+          const title = await gpt(groupPrompt(group), 0.2, []);
+          return { group_about: title, group_of_comments: group };
+        } catch (error) {
+          console.error("Error while generating groups:", error.message);
+          return { group_about: "Other", group_of_comments: group };
+        }
+      })
+    );
 
-    res.json(responses);
+    res.json(generatedGroups);
   } catch (error) {
-    console.error("Error During Grouping:", error.message);
+    console.error("Error during grouping:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
